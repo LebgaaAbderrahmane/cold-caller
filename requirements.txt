@@ -1,0 +1,24 @@
+# Phone control
+pure-python-adb==0.3.0.dev0
+
+# Speech to text
+faster-whisper==1.0.3
+
+# Text to speech
+TTS==0.22.0
+
+# AI brain
+ollama==0.2.1
+
+# Audio
+sounddevice==0.4.6
+soundfile==0.12.1
+pyaudio==0.2.14
+numpy==1.26.4
+
+# Data
+pandas>=1.4,<2.0
+python-dotenv==1.0.1
+
+# UI (optional)
+streamlit==1.35.0
