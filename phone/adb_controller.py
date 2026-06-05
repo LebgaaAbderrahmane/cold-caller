@@ -67,6 +67,17 @@ class ADBController:
         else:
             print(f"   Install issue: {result[:100]}")
 
+        grant = self._run_full(
+            ["shell", "pm", "grant", HELPER_PACKAGE, "android.permission.CALL_PHONE"]
+        )
+        if "not allowed" not in grant.lower():
+            print("   CALL_PHONE permission granted via pm")
+        dumpsys = self._run(["shell", "dumpsys", "package", HELPER_PACKAGE])
+        if "granted=true" in dumpsys:
+            print("   CALL_PHONE: granted=true")
+        else:
+            print("   CALL_PHONE: may need runtime confirmation")
+
     # ─────────────────────────────────────────
     # Dual-SIM support
     # ─────────────────────────────────────────
