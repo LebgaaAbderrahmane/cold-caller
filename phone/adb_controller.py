@@ -77,12 +77,13 @@ class ADBController:
         for perm in [
             "android.permission.CALL_PHONE",
             "android.permission.READ_PHONE_STATE",
+            "android.permission.RECORD_AUDIO",
         ]:
             grant = self._run_full(["shell", "pm", "grant", HELPER_PACKAGE, perm])
             if "not allowed" not in grant.lower():
                 print(f"   {perm} granted via pm")
         dumpsys = self._run(["shell", "dumpsys", "package", HELPER_PACKAGE])
-        for perm in ["CALL_PHONE", "READ_PHONE_STATE"]:
+        for perm in ["CALL_PHONE", "READ_PHONE_STATE", "RECORD_AUDIO"]:
             if f"{perm}: granted=true" in dumpsys:
                 print(f"   {perm}: granted=true")
             else:
@@ -193,6 +194,60 @@ class ADBController:
 
     def accept_call(self):
         self._run(["shell", "input", "keyevent", "5"])
+
+    # ─────────────────────────────────────────
+    # Audio bridge
+    # ─────────────────────────────────────────
+
+    AUDIO_CAPTURE_PORT = 4567
+    AUDIO_PLAYBACK_PORT = 4568
+
+    def start_audio_bridge(self):
+        self._run(
+            [
+                "shell",
+                "am",
+                "start",
+                "-n",
+                f"{HELPER_PACKAGE}/{HELPER_ACTIVITY}",
+                "-a",
+                "com.coldcaller.START_AUDIO",
+            ]
+        )
+        time.sleep(2)
+
+    def stop_audio_bridge(self):
+        self._run(
+            [
+                "shell",
+                "am",
+                "start",
+                "-n",
+                f"{HELPER_PACKAGE}/{HELPER_ACTIVITY}",
+                "-a",
+                "com.coldcaller.STOP_AUDIO",
+            ]
+        )
+
+    def forward_audio_ports(self):
+        self._run(
+            [
+                "forward",
+                f"tcp:{self.AUDIO_CAPTURE_PORT}",
+                f"tcp:{self.AUDIO_CAPTURE_PORT}",
+            ]
+        )
+        self._run(
+            [
+                "forward",
+                f"tcp:{self.AUDIO_PLAYBACK_PORT}",
+                f"tcp:{self.AUDIO_PLAYBACK_PORT}",
+            ]
+        )
+
+    def remove_audio_forward(self):
+        self._run(["forward", "--remove", f"tcp:{self.AUDIO_CAPTURE_PORT}"])
+        self._run(["forward", "--remove", f"tcp:{self.AUDIO_PLAYBACK_PORT}"])
 
     # ─────────────────────────────────────────
     # Call state detection

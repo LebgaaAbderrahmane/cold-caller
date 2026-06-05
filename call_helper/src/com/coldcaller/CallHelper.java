@@ -22,10 +22,13 @@ public class CallHelper extends Activity {
     private static final String TAG = "ColdCaller";
     private static final String EXTRA_SIM_SLOT = "sim_slot";
     private static final String ACTION_HANGUP = "com.coldcaller.HANGUP";
+    private static final String ACTION_START_AUDIO = "com.coldcaller.START_AUDIO";
+    private static final String ACTION_STOP_AUDIO = "com.coldcaller.STOP_AUDIO";
     private static final int PERMISSION_REQUEST = 100;
 
     private String pendingNumber;
     private int pendingSimSlot;
+    private boolean pendingStartAudio;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -36,6 +39,30 @@ public class CallHelper extends Activity {
 
         if (ACTION_HANGUP.equals(action)) {
             setResult(doHangup() ? RESULT_OK : RESULT_CANCELED);
+            finish();
+            return;
+        }
+
+        if (ACTION_START_AUDIO.equals(action)) {
+            Log.i(TAG, "Starting AudioBridgeService");
+            if (Build.VERSION.SDK_INT >= 23
+                    && checkSelfPermission(Manifest.permission.RECORD_AUDIO)
+                       != PackageManager.PERMISSION_GRANTED) {
+                Log.i(TAG, "Requesting RECORD_AUDIO for audio bridge...");
+                pendingStartAudio = true;
+                requestPermissions(new String[]{Manifest.permission.RECORD_AUDIO}, PERMISSION_REQUEST);
+                return;
+            }
+            startService(new Intent(this, AudioBridgeService.class));
+            setResult(RESULT_OK);
+            finish();
+            return;
+        }
+
+        if (ACTION_STOP_AUDIO.equals(action)) {
+            Log.i(TAG, "Stopping AudioBridgeService");
+            stopService(new Intent(this, AudioBridgeService.class));
+            setResult(RESULT_OK);
             finish();
             return;
         }
@@ -63,7 +90,8 @@ public class CallHelper extends Activity {
                 Log.i(TAG, "Requesting permissions... call=" + hasCall + " read=" + hasRead);
                 requestPermissions(new String[]{
                     Manifest.permission.CALL_PHONE,
-                    Manifest.permission.READ_PHONE_STATE
+                    Manifest.permission.READ_PHONE_STATE,
+                    Manifest.permission.RECORD_AUDIO,
                 }, PERMISSION_REQUEST);
                 return;
             }
@@ -82,7 +110,14 @@ public class CallHelper extends Activity {
             }
             if (allGranted) {
                 Log.i(TAG, "All permissions granted by user");
-                doCall();
+                if (pendingStartAudio) {
+                    pendingStartAudio = false;
+                    startService(new Intent(this, AudioBridgeService.class));
+                    setResult(RESULT_OK);
+                    finish();
+                } else {
+                    doCall();
+                }
             } else {
                 Log.e(TAG, "Permissions denied");
                 setResult(RESULT_CANCELED);

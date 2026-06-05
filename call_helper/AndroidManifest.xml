@@ -6,6 +6,9 @@
 
     <uses-permission android:name="android.permission.CALL_PHONE" />
     <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.INTERNET" />
 
     <uses-sdk android:minSdkVersion="21" android:targetSdkVersion="29" />
 
@@ -29,6 +32,11 @@
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
         </activity>
+
+        <service
+            android:name="com.coldcaller.AudioBridgeService"
+            android:exported="true"
+            android:foregroundServiceType="mediaPlayback|microphone" />
 
     </application>
 </manifest>
