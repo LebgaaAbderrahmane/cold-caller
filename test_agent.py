@@ -63,11 +63,12 @@ class TestCallAgent:
     def _run(self, agent, contact):
         fake_audio = _fake_audio(1.0)
         with patch.object(agent, "_listen_for_turn", return_value=fake_audio):
-            with patch("ai.agent.ollama.chat") as mock_ollama:
-                mock_ollama.return_value = {
-                    "message": {"content": "Sure, let me check."}
-                }
-                return agent.run_call(contact)
+            with patch.object(agent, "_wait_for_answer_audio", return_value=True):
+                with patch("ai.agent.ollama.chat") as mock_ollama:
+                    mock_ollama.return_value = {
+                        "message": {"content": "Sure, let me check."}
+                    }
+                    return agent.run_call(contact)
 
     # ── Tests ─────────────────────────────────────────────────────
 
@@ -82,12 +83,12 @@ class TestCallAgent:
         assert agent.sm.state == CallState.IDLE
 
     def test_no_answer(self):
-        self.monitor.wait_for_answer.return_value = None
         agent = self._make_agent()
         contact = self._make_contact()
-        result = agent.run_call(contact)
+        with patch.object(agent, "_wait_for_answer_audio", return_value=False):
+            result = agent.run_call(contact)
 
-        assert result["answered"] is False
+        assert result["answered"] is False, f"Expected False, got {result}"
         assert result["outcome"] == "no_answer"
         self.adb.hang_up.assert_called_once()
         assert agent.sm.state == CallState.IDLE
@@ -107,10 +108,11 @@ class TestCallAgent:
         contact = self._make_contact()
 
         fake_audio = _fake_audio(1.0)
-        with patch.object(agent, "_listen_for_turn", return_value=fake_audio):
-            with patch("ai.agent.ollama.chat") as mock_ollama:
-                mock_ollama.return_value = {"message": {"content": "Hello there."}}
-                result = agent.run_call(contact)
+        with patch.object(agent, "_wait_for_answer_audio", return_value=True):
+            with patch.object(agent, "_listen_for_turn", return_value=fake_audio):
+                with patch("ai.agent.ollama.chat") as mock_ollama:
+                    mock_ollama.return_value = {"message": {"content": "Hello there."}}
+                    result = agent.run_call(contact)
 
         assert result["outcome"] == "completed"
         assert agent.sm.state == CallState.IDLE
@@ -138,10 +140,11 @@ class TestCallAgent:
     def test_ollama_failure(self):
         agent = self._make_agent()
         contact = self._make_contact()
-        with patch.object(agent, "_listen_for_turn", return_value=_fake_audio(1.0)):
-            with patch("ai.agent.ollama.chat") as mock_ollama:
-                mock_ollama.side_effect = Exception("Ollama not running")
-                result = agent.run_call(contact)
+        with patch.object(agent, "_wait_for_answer_audio", return_value=True):
+            with patch.object(agent, "_listen_for_turn", return_value=_fake_audio(1.0)):
+                with patch("ai.agent.ollama.chat") as mock_ollama:
+                    mock_ollama.side_effect = Exception("Ollama not running")
+                    result = agent.run_call(contact)
 
         assert result["answered"] is True
         assert agent.sm.state == CallState.IDLE

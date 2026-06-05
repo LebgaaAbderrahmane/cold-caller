@@ -76,15 +76,14 @@ class CallAgent:
             self.adb.make_call(contact.phone)
 
             self.sm.transition(CallState.RINGING)
-            call_duration = self.monitor.wait_for_answer(timeout=45)
-            if call_duration is None:
+            if not self._wait_for_answer_audio():
                 outcome["outcome"] = "no_answer"
                 self.adb.hang_up()
                 return outcome
 
             outcome["answered"] = True
-            outcome["duration"] = call_duration
-            time.sleep(0.5)
+            outcome["duration"] = self.monitor.get_call_duration()
+            time.sleep(0.3)
 
             detected_lang = "en"
             self.sm.transition(CallState.GREETING)
@@ -173,7 +172,10 @@ class CallAgent:
                 pass
 
         finally:
-            self.sm.transition(CallState.LOGGED)
+            try:
+                self.sm.transition(CallState.LOGGED)
+            except ValueError:
+                pass
             self.sm.reset()
             self.conversation_history.clear()
             self._detected_language = None
@@ -182,6 +184,44 @@ class CallAgent:
         return outcome
 
     # ── Internal: audio ingestion ──────────────────────────────────
+
+    # ── Internal: answer detection (MTK workaround) ──────────────
+
+    def _wait_for_answer_audio(self, ring_timeout: float = 8) -> bool:
+        """Wait for call answer.
+
+        Normal path: detects offhook from telephony state.
+        MTK workaround: MTK devices never report mCallState=1.
+        After call rings for `ring_timeout` seconds, assume answered.
+        The audio bridge will detect silence if nobody is there.
+        """
+        start = time.time()
+
+        # Wait for ringing to register (max 15s)
+        while time.time() < start + 15:
+            state = self.monitor.get_state()
+            if state == "ringing":
+                break
+            if state == "offhook":
+                return True
+            time.sleep(0.3)
+        else:
+            return False  # Never saw ringing
+
+        # Wait for ring_timeout seconds for the person to pick up
+        # On MTK, the call stays in "ringing" even when answered,
+        # so we proceed to conversation regardless after the delay.
+        ring_start = time.time()
+        while time.time() < ring_start + ring_timeout:
+            state = self.monitor.get_state()
+            if state == "offhook":
+                return True
+            if state == "idle":
+                return False
+            time.sleep(0.3)
+
+        # Proceed — call either answered (MTK) or still ringing (voicemail soon)
+        return True
 
     def _on_audio_chunk(self, pcm_bytes: bytes):
         if self.sm.state == CallState.LISTENING:
