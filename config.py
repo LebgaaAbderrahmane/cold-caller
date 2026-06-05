@@ -14,6 +14,11 @@ LISTEN_DURATION = int(os.getenv("LISTEN_DURATION", 6))
 # AI
 OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "llama3")
 WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
+CALL_OBJECTIVE = os.getenv(
+    "CALL_OBJECTIVE", "qualify the lead and schedule a product demo"
+)
+AGENT_NAME = os.getenv("AGENT_NAME", "Alex")
+MAX_TURNS = int(os.getenv("MAX_TURNS", "10"))
 
 # ADB
 ADB_DEVICE_ID = os.getenv("ADB_DEVICE_ID", "f5cc454f0512")

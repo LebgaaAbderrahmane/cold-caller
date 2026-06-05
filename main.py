@@ -9,9 +9,22 @@ from dataclasses import dataclass, field
 from datetime import datetime
 from typing import Optional
 
-from config import SIM_SLOT
+from config import (
+    SIM_SLOT,
+    OLLAMA_MODEL,
+    WHISPER_MODEL,
+    COMPANY_NAME,
+    COMPANY_VALUE_PROP,
+    CALL_OBJECTIVE,
+    AGENT_NAME,
+    MAX_TURNS,
+)
 from phone.adb_controller import ADBController
 from phone.call_monitor import CallMonitor
+from phone.audio_bridge import AudioBridge
+from voice.stt import STTEngine
+from voice.tts import TTSEngine
+from ai.agent import CallAgent
 
 
 @dataclass
@@ -55,36 +68,30 @@ def load_contacts(path: str) -> list[Contact]:
     return contacts
 
 
-def run_conversation_stub(adb, monitor, contact: Contact, call_duration: float):
-    print(f"\n   [STUB] Connected to {contact.name}. Simulating conversation...")
-    wait_time = min(8, max(3, int(call_duration)))
-    time.sleep(wait_time)
-    print(f"   [STUB] Conversation ended.")
-
-
-def call_contact(adb, monitor, contact: Contact, sim_slot: int) -> CallOutcome:
+def call_contact(
+    adb, monitor, audio_bridge, stt, tts, contact: Contact, agent_config: dict
+) -> CallOutcome:
     outcome = CallOutcome(contact=contact)
     _current_call["in_progress"] = True
 
     try:
-        adb.make_call(contact.phone)
+        agent = CallAgent(agent_config, adb, monitor, audio_bridge, stt, tts)
+        result = agent.run_call(contact)
 
-        result = monitor.wait_for_answer(timeout=45)
-        if result is not None:
-            outcome.answered = True
-            outcome.duration = result
-            outcome.outcome = "answered"
-            print(f"   Call answered after {result:.1f}s")
+        outcome.answered = result.get("answered", False)
+        outcome.duration = result.get("duration")
+        outcome.outcome = result.get("outcome", "unknown")
+        outcome.error = result.get("error")
 
-            run_conversation_stub(adb, monitor, contact, result)
-
-            print("   Hanging up...")
-            adb.hang_up()
-            monitor.wait_for_hangup(timeout=10)
-        else:
-            outcome.outcome = "no_answer"
-            print("   Call not answered")
-            adb.hang_up()
+        transcript = result.get("transcript")
+        if transcript:
+            ts = int(time.time())
+            transcript_dir = "data/transcripts"
+            os.makedirs(transcript_dir, exist_ok=True)
+            path = os.path.join(transcript_dir, f"{contact.phone}_{ts}.txt")
+            with open(path, "w") as f:
+                f.write(transcript)
+            print(f"   Transcript saved: {path}")
     except Exception as e:
         outcome.outcome = "error"
         outcome.error = str(e)
@@ -123,8 +130,16 @@ def print_summary(outcomes: list[CallOutcome], start_time: float):
         print(f"  {o.contact.name:20s} {o.outcome:12s}{dur}{err}")
 
 
+_cleanup_resources = []
+
+
 def signal_handler(sig, frame):
     print("\n\nInterrupt received. Cleaning up...")
+    for res in _cleanup_resources:
+        try:
+            res.stop()
+        except Exception:
+            pass
     sys.exit(0)
 
 
@@ -184,6 +199,25 @@ def main():
     monitor = CallMonitor(adb)
     monitor.start()
 
+    print("Initializing audio bridge...")
+    audio_bridge = AudioBridge(adb)
+    _cleanup_resources.append(audio_bridge)
+
+    print("Loading STT engine...")
+    stt = STTEngine(model_size=WHISPER_MODEL)
+
+    print("Loading TTS engine...")
+    tts = TTSEngine()
+
+    agent_config = {
+        "agent_name": AGENT_NAME,
+        "company_name": COMPANY_NAME,
+        "value_prop": COMPANY_VALUE_PROP,
+        "call_objective": CALL_OBJECTIVE,
+        "ollama_model": OLLAMA_MODEL,
+        "max_turns": MAX_TURNS,
+    }
+
     outcomes: list[CallOutcome] = []
     start_time = time.time()
 
@@ -192,7 +226,9 @@ def main():
             print(
                 f"\n[{i + 1}/{len(contacts)}] Calling {contact.name} <{contact.phone}>"
             )
-            outcome = call_contact(adb, monitor, contact, sim_slot)
+            outcome = call_contact(
+                adb, monitor, audio_bridge, stt, tts, contact, agent_config
+            )
             outcomes.append(outcome)
             print(f"  Outcome: {outcome.outcome}")
 
@@ -201,6 +237,7 @@ def main():
                 time.sleep(args.wait_between)
     finally:
         monitor.stop()
+        audio_bridge.stop()
         print_summary(outcomes, start_time)
 
 
