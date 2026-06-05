@@ -62,10 +62,16 @@ class ADBController:
             print("   Helper APK installed")
         else:
             print(f"   Install issue: {result[:200]}")
-            # Retry without flags
-            result = self._run_full(["install", "-r", HELPER_APK_PATH])
-            if "Success" in result:
-                print("   Helper APK installed (retry)")
+            if "UPDATE_INCOMPATIBLE" in result or "SIGNATURE" in result.upper():
+                print("   Signature mismatch — uninstalling old version first...")
+                self._run_full(["uninstall", HELPER_PACKAGE])
+                result = self._run_full(
+                    ["install", "--no-incremental", HELPER_APK_PATH]
+                )
+                if "Success" in result:
+                    print("   Helper APK installed (fresh)")
+                else:
+                    print(f"   Fresh install also failed: {result[:200]}")
 
         grant = self._run_full(
             ["shell", "pm", "grant", HELPER_PACKAGE, "android.permission.CALL_PHONE"]

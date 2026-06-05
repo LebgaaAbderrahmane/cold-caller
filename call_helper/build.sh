@@ -7,7 +7,7 @@ PLATFORM="$ANDROID_HOME/platforms/android-34/android.jar"
 
 cd "$(dirname "$0")"
 
-rm -rf build/classes build/dex build/*.apk build/*.keystore
+rm -rf build/classes build/dex build/*.apk
 mkdir -p build/classes build/dex
 
 # Compile
@@ -30,9 +30,11 @@ EOF
   -F build/CallHelper-unsigned.apk build/dex/
 
 # Sign
-keytool -genkeypair -keystore build/callhelper.keystore -alias callhelper \
-  -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CallHelper" \
-  -storepass password -keypass password 2>/dev/null
+if [ ! -f build/callhelper.keystore ]; then
+  keytool -genkeypair -keystore build/callhelper.keystore -alias callhelper \
+    -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=CallHelper" \
+    -storepass password -keypass password 2>/dev/null
+fi
 
 "$BUILD_TOOLS/apksigner" sign --ks build/callhelper.keystore --ks-pass pass:password \
   --ks-key-alias callhelper --out build/CallHelper.apk build/CallHelper-unsigned.apk
