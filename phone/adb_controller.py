@@ -73,16 +73,19 @@ class ADBController:
                 else:
                     print(f"   Fresh install also failed: {result[:200]}")
 
-        grant = self._run_full(
-            ["shell", "pm", "grant", HELPER_PACKAGE, "android.permission.CALL_PHONE"]
-        )
-        if "not allowed" not in grant.lower():
-            print("   CALL_PHONE permission granted via pm")
+        for perm in [
+            "android.permission.CALL_PHONE",
+            "android.permission.READ_PHONE_STATE",
+        ]:
+            grant = self._run_full(["shell", "pm", "grant", HELPER_PACKAGE, perm])
+            if "not allowed" not in grant.lower():
+                print(f"   {perm} granted via pm")
         dumpsys = self._run(["shell", "dumpsys", "package", HELPER_PACKAGE])
-        if "granted=true" in dumpsys:
-            print("   CALL_PHONE: granted=true")
-        else:
-            print("   CALL_PHONE: may need runtime confirmation")
+        for perm in ["CALL_PHONE", "READ_PHONE_STATE"]:
+            if f"{perm}: granted=true" in dumpsys:
+                print(f"   {perm}: granted=true")
+            else:
+                print(f"   {perm}: may need runtime confirmation")
 
     # ─────────────────────────────────────────
     # Dual-SIM support

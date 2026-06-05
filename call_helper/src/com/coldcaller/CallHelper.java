@@ -1,10 +1,14 @@
 package com.coldcaller;
 
+import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.os.IBinder;
+import android.telecom.PhoneAccount;
 import android.telecom.PhoneAccountHandle;
 import android.telecom.TelecomManager;
 import android.telephony.SubscriptionInfo;
@@ -18,6 +22,10 @@ public class CallHelper extends Activity {
     private static final String TAG = "ColdCaller";
     private static final String EXTRA_SIM_SLOT = "sim_slot";
     private static final String ACTION_HANGUP = "com.coldcaller.HANGUP";
+    private static final int PERMISSION_REQUEST = 100;
+
+    private String pendingNumber;
+    private int pendingSimSlot;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -32,27 +40,60 @@ public class CallHelper extends Activity {
             return;
         }
 
-        doCall(intent);
-    }
-
-    private void doCall(Intent intent) {
-        String phoneNumber = null;
-
+        pendingNumber = null;
         if (intent.getData() != null) {
-            phoneNumber = intent.getData().getSchemeSpecificPart();
+            pendingNumber = intent.getData().getSchemeSpecificPart();
         }
-        if (phoneNumber == null && intent.hasExtra(Intent.EXTRA_PHONE_NUMBER)) {
-            phoneNumber = intent.getStringExtra(Intent.EXTRA_PHONE_NUMBER);
+        if (pendingNumber == null && intent.hasExtra(Intent.EXTRA_PHONE_NUMBER)) {
+            pendingNumber = intent.getStringExtra(Intent.EXTRA_PHONE_NUMBER);
         }
-        if (phoneNumber == null) {
+        if (pendingNumber == null) {
             Log.e(TAG, "No phone number provided");
             setResult(RESULT_CANCELED);
             finish();
             return;
         }
+        pendingSimSlot = intent.getIntExtra(EXTRA_SIM_SLOT, -1);
+        Log.i(TAG, "Calling " + pendingNumber + " slot=" + pendingSimSlot);
 
-        int simSlot = intent.getIntExtra(EXTRA_SIM_SLOT, -1);
-        Log.i(TAG, "Calling " + phoneNumber + " slot=" + simSlot);
+        if (Build.VERSION.SDK_INT >= 23) {
+            boolean hasCall = checkSelfPermission(Manifest.permission.CALL_PHONE) == PackageManager.PERMISSION_GRANTED;
+            boolean hasRead = checkSelfPermission(Manifest.permission.READ_PHONE_STATE) == PackageManager.PERMISSION_GRANTED;
+            if (!hasCall || !hasRead) {
+                Log.i(TAG, "Requesting permissions... call=" + hasCall + " read=" + hasRead);
+                requestPermissions(new String[]{
+                    Manifest.permission.CALL_PHONE,
+                    Manifest.permission.READ_PHONE_STATE
+                }, PERMISSION_REQUEST);
+                return;
+            }
+        }
+
+        doCall();
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int code, String[] perms, int[] results) {
+        if (code == PERMISSION_REQUEST) {
+            boolean allGranted = true;
+            for (int i = 0; i < results.length; i++) {
+                Log.i(TAG, "  " + perms[i] + " = " + (results[i] == PackageManager.PERMISSION_GRANTED ? "granted" : "denied"));
+                if (results[i] != PackageManager.PERMISSION_GRANTED) allGranted = false;
+            }
+            if (allGranted) {
+                Log.i(TAG, "All permissions granted by user");
+                doCall();
+            } else {
+                Log.e(TAG, "Permissions denied");
+                setResult(RESULT_CANCELED);
+                finish();
+            }
+        }
+    }
+
+    private void doCall() {
+        String phoneNumber = pendingNumber;
+        int simSlot = pendingSimSlot;
 
         try {
             Uri telUri = Uri.parse("tel:" + phoneNumber);
@@ -80,28 +121,49 @@ public class CallHelper extends Activity {
                     }
                 }
 
-                TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
-                if (telecom != null) {
-                    List<PhoneAccountHandle> accounts = telecom.getCallCapablePhoneAccounts();
-                    Log.i(TAG, "Phone accounts: " + (accounts != null ? accounts.size() : "null"));
-                    if (accounts != null) {
-                        for (PhoneAccountHandle handle : accounts) {
-                            Log.i(TAG, "  account: " + handle.getId() + " (" + handle.getComponentName() + ")");
-                        }
-                        for (PhoneAccountHandle handle : accounts) {
-                            String id = handle.getId();
-                            if (id != null && (id.equals(String.valueOf(subId))
-                                    || id.endsWith(":" + simSlot)
-                                    || id.endsWith("/" + simSlot)
-                                    || id.equals("sim" + simSlot)
-                                    || id.equals("sub" + simSlot)
-                                    || id.equals(String.valueOf(simSlot)))) {
-                                targetHandle = handle;
-                                Log.i(TAG, "Matched PhoneAccountHandle: " + id);
-                                break;
+                try {
+                    TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
+                    if (telecom != null) {
+                        List<PhoneAccountHandle> accounts = telecom.getCallCapablePhoneAccounts();
+                        Log.i(TAG, "Phone accounts: " + (accounts != null ? accounts.size() : "null"));
+                        if (accounts != null) {
+                            for (PhoneAccountHandle handle : accounts) {
+                                String id = handle.getId();
+                                try {
+                                    PhoneAccount pa = telecom.getPhoneAccount(handle);
+                                    if (pa != null) {
+                                        Uri subAddr = pa.getSubscriptionAddress();
+                                        Bundle extras = pa.getExtras();
+                                        StringBuilder sb = new StringBuilder();
+                                        sb.append("  account: ").append(id)
+                                            .append(" subAddr=").append(subAddr);
+                                        if (extras != null && !extras.isEmpty()) {
+                                            sb.append(" extras={");
+                                            for (String key : extras.keySet()) {
+                                                sb.append(key).append("=").append(extras.get(key)).append(", ");
+                                            }
+                                            sb.append("}");
+                                        }
+                                        Log.i(TAG, sb.toString());
+                                    }
+                                } catch (Exception e) {
+                                    Log.w(TAG, "  account: " + id + " (getPhoneAccount failed: " + e.getMessage() + ")");
+                                }
+                            }
+                            // Match by slot index: first handle = slot 0, second = slot 1 (per subscription order)
+                            int handleIdx = 0;
+                            for (PhoneAccountHandle handle : accounts) {
+                                if (handleIdx == simSlot) {
+                                    targetHandle = handle;
+                                    Log.i(TAG, "Matched PhoneAccountHandle by index " + handleIdx + ": " + handle.getId());
+                                    break;
+                                }
+                                handleIdx++;
                             }
                         }
                     }
+                } catch (SecurityException e) {
+                    Log.w(TAG, "getCallCapablePhoneAccounts blocked: " + e.getMessage());
                 }
             }
 
@@ -112,7 +174,7 @@ public class CallHelper extends Activity {
             if (!placed) placed = tryITelephonyCall(phoneNumber, subId);
             if (!placed) placed = tryPlaceCallViaIntent(telUri, simSlot, subId);
 
-            setResult(placed ? RESULT_OK : RESULT_CANCELED);
+            if (placed) Log.i(TAG, "Call placed successfully");
         } catch (Exception e) {
             Log.e(TAG, "Exception: " + e.getClass().getName() + ": " + e.getMessage());
             setResult(RESULT_CANCELED);
@@ -121,19 +183,46 @@ public class CallHelper extends Activity {
         finish();
     }
 
+    private void trySetDefaultVoiceSub(int subId) {
+        Log.i(TAG, "Trying to set default voice sub to " + subId);
+        try {
+            SubscriptionManager subManager = (SubscriptionManager) getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE);
+            if (subManager == null) return;
+            Method m = subManager.getClass().getMethod("setDefaultVoiceSubId", int.class);
+            m.invoke(subManager, subId);
+            Log.i(TAG, "setDefaultVoiceSubId(" + subId + ") succeeded");
+        } catch (Exception e) {
+            Log.w(TAG, "setDefaultVoiceSubId failed: " + e.getMessage());
+        }
+        try {
+            TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+            Method getITelephony = tm.getClass().getDeclaredMethod("getITelephony");
+            getITelephony.setAccessible(true);
+            Object telephony = getITelephony.invoke(tm);
+            for (Method m : telephony.getClass().getMethods()) {
+                String name = m.getName().toLowerCase();
+                if ((name.contains("default") || name.contains("preferred"))
+                        && m.getParameterCount() == 1
+                        && m.getParameterTypes()[0] == int.class) {
+                    Log.i(TAG, "Trying ITelephony." + m.getName() + "(" + subId + ")");
+                    m.invoke(telephony, subId);
+                    Log.i(TAG, m.getName() + " succeeded");
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "ITelephony default methods failed: " + e.getMessage());
+        }
+    }
+
     private boolean tryDialerDirect(Uri telUri, int simSlot, int subId) {
         try {
             TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
             if (telecom == null) return false;
-
             String defaultDialer = telecom.getDefaultDialerPackage();
             Log.i(TAG, "Default dialer package: " + defaultDialer);
-
             Intent intent = new Intent(Intent.ACTION_CALL, telUri);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            if (defaultDialer != null) {
-                intent.setPackage(defaultDialer);
-            }
+            if (defaultDialer != null) intent.setPackage(defaultDialer);
             if (simSlot >= 0) {
                 intent.putExtra("com.android.phone.extra.slot", simSlot);
                 intent.putExtra("slot", simSlot);
@@ -157,53 +246,40 @@ public class CallHelper extends Activity {
             Method getITelephony = tm.getClass().getDeclaredMethod("getITelephony");
             getITelephony.setAccessible(true);
             Object telephony = getITelephony.invoke(tm);
-
             Log.i(TAG, "ITelephony methods:");
             for (Method m : telephony.getClass().getMethods()) {
                 String name = m.getName();
                 if (name.contains("call") || name.contains("dial") || name.contains("place")) {
                     StringBuilder sb = new StringBuilder();
                     sb.append("  ").append(name).append("(");
-                    for (Class<?> p : m.getParameterTypes()) {
-                        sb.append(p.getSimpleName()).append(",");
-                    }
+                    for (Class<?> p : m.getParameterTypes()) sb.append(p.getSimpleName()).append(",");
                     sb.append(")");
                     Log.i(TAG, sb.toString());
                 }
             }
-
             String[][] callSignatures = {
                 {"call", String.class.getName(), int.class.getName()},
                 {"call", String.class.getName(), String.class.getName(), int.class.getName()},
                 {"call", String.class.getName(), String.class.getName()},
                 {"dial", String.class.getName(), int.class.getName()},
             };
-
             for (String[] sig : callSignatures) {
                 try {
                     Class<?>[] paramTypes = new Class<?>[sig.length - 1];
-                    for (int i = 0; i < paramTypes.length; i++) {
-                        paramTypes[i] = Class.forName(sig[i + 1]);
-                    }
+                    for (int i = 0; i < paramTypes.length; i++) paramTypes[i] = Class.forName(sig[i + 1]);
                     Method m = telephony.getClass().getMethod(sig[0], paramTypes);
                     Object[] args = new Object[paramTypes.length];
                     if (paramTypes.length == 2 && paramTypes[1] == int.class) {
-                        args[0] = number;
-                        args[1] = subId;
+                        args[0] = number; args[1] = subId;
                     } else if (paramTypes.length == 3) {
-                        args[0] = getPackageName();
-                        args[1] = number;
-                        args[2] = subId;
+                        args[0] = getPackageName(); args[1] = number; args[2] = subId;
                     } else if (paramTypes.length == 2 && paramTypes[1] == String.class) {
-                        args[0] = number;
-                        args[1] = String.valueOf(subId);
+                        args[0] = number; args[1] = String.valueOf(subId);
                     }
                     m.invoke(telephony, args);
                     Log.i(TAG, sig[0] + " succeeded");
                     return true;
-                } catch (NoSuchMethodException e) {
-                    // try next
-                }
+                } catch (NoSuchMethodException e) { }
             }
         } catch (Exception e) {
             Log.w(TAG, "ITelephony call failed: " + e.getMessage());
@@ -215,7 +291,6 @@ public class CallHelper extends Activity {
         try {
             TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
             if (telecom == null) return false;
-
             Bundle extras = new Bundle();
             if (handle != null) {
                 extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
@@ -227,7 +302,6 @@ public class CallHelper extends Activity {
                 extras.putInt("subscription", subId);
                 extras.putInt(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, subId);
             }
-
             telecom.placeCall(telUri, extras);
             Log.i(TAG, "TelecomManager.placeCall succeeded");
             return true;
@@ -263,40 +337,6 @@ public class CallHelper extends Activity {
             Log.w(TAG, "Intent.ACTION_CALL failed: " + e.getMessage());
         }
         return false;
-    }
-
-    private void trySetDefaultVoiceSub(int subId) {
-        Log.i(TAG, "Trying to set default voice sub to " + subId);
-        try {
-            SubscriptionManager subManager = (SubscriptionManager) getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE);
-            if (subManager == null) return;
-
-            Method m = subManager.getClass().getMethod("setDefaultVoiceSubId", int.class);
-            m.invoke(subManager, subId);
-            Log.i(TAG, "setDefaultVoiceSubId(" + subId + ") succeeded");
-        } catch (Exception e) {
-            Log.w(TAG, "setDefaultVoiceSubId failed: " + e.getMessage());
-        }
-
-        try {
-            TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
-            Method getITelephony = tm.getClass().getDeclaredMethod("getITelephony");
-            getITelephony.setAccessible(true);
-            Object telephony = getITelephony.invoke(tm);
-
-            for (Method m : telephony.getClass().getMethods()) {
-                String name = m.getName().toLowerCase();
-                if ((name.contains("default") || name.contains("preferred"))
-                        && m.getParameterCount() == 1
-                        && m.getParameterTypes()[0] == int.class) {
-                    Log.i(TAG, "Trying ITelephony." + m.getName() + "(" + subId + ")");
-                    m.invoke(telephony, subId);
-                    Log.i(TAG, m.getName() + " succeeded");
-                }
-            }
-        } catch (Exception e) {
-            Log.w(TAG, "ITelephony default methods failed: " + e.getMessage());
-        }
     }
 
     private boolean doHangup() {
