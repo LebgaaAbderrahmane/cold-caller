@@ -17,3 +17,4 @@ WHISPER_MODEL = os.getenv("WHISPER_MODEL", "base")
 
 # ADB
 ADB_DEVICE_ID = os.getenv("ADB_DEVICE_ID", "f5cc454f0512")
+SIM_SLOT = int(os.getenv("SIM_SLOT", "0"))
