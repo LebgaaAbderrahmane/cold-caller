@@ -1,6 +1,5 @@
 import subprocess
 import time
-import re
 import os
 from config import ADB_DEVICE_ID, SIM_SLOT
 
@@ -102,29 +101,10 @@ class ADBController:
             print(f"   Restored voice SIM setting: {saved}")
 
     def _get_subscription_id_for_slot(self, slot: int) -> int:
-        output = self._run(
-            ["shell", "content", "query", "--uri", "content://telephony/siminfo/"]
-        )
-        for col in ["subscription_id", "sub_id", "_id", "sim_id"]:
-            for m in re.finditer(
-                r"Row:.*?slot_index\s*=\s*"
-                + str(slot)
-                + r".*?"
-                + col
-                + r"\s*=\s*(\d+)",
-                output,
-                re.IGNORECASE | re.DOTALL,
-            ):
-                return int(m.group(1))
-            for m in re.finditer(
-                r"Row:.*?" + col + r"\s*=\s*(\d+).*?slot_index\s*=\s*" + str(slot),
-                output,
-                re.IGNORECASE | re.DOTALL,
-            ):
-                return int(m.group(1))
-        # Dump raw output for debugging
-        print(f"   Raw siminfo output:\n{output[:500]}")
-        return slot + 1
+        # Content://telephony/siminfo/ is blocked by SecurityException on this ROM.
+        # Known values from phone's subscription info (from APK logcat):
+        known = {0: 1, 1: 24}
+        return known.get(slot, slot + 1)
 
     def prepare_sim(self):
         current = self._get_voice_call_setting()
