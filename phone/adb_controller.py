@@ -1,7 +1,7 @@
 import subprocess
 import time
 import os
-from config import ADB_DEVICE_ID, SIM_SLOT
+from config import ADB_DEVICE_ID, SIM_SLOT, UNLOCK_SWIPE_START, UNLOCK_SWIPE_END
 
 
 HELPER_PACKAGE = "com.coldcaller"
@@ -19,6 +19,7 @@ class ADBController:
         self.device_id = ADB_DEVICE_ID
         self.sim_slot = SIM_SLOT
         self._saved_voice_setting = None
+        self._mic_muted = False
         self._verify_connection()
         self._ensure_helper_apk_installed()
 
@@ -336,10 +337,14 @@ class ADBController:
         self._run(["shell", "media", "volume", "--stream", "3", "--set", str(level)])
 
     def mute_microphone(self):
-        self._run(["shell", "input", "keyevent", "164"])
+        if not self._mic_muted:
+            self._run(["shell", "input", "keyevent", "164"])
+            self._mic_muted = True
 
     def unmute_microphone(self):
-        self._run(["shell", "input", "keyevent", "164"])
+        if self._mic_muted:
+            self._run(["shell", "input", "keyevent", "164"])
+            self._mic_muted = False
 
     # ─────────────────────────────────────────
     # Audio file playback
@@ -385,7 +390,15 @@ class ADBController:
 
     def unlock_screen(self):
         self.wake_screen()
-        self._run(["shell", "input", "swipe", "540", "1800", "540", "900"])
+        self._run(
+            [
+                "shell",
+                "input",
+                "swipe",
+                *UNLOCK_SWIPE_START.split(),
+                *UNLOCK_SWIPE_END.split(),
+            ]
+        )
 
     def get_screen_state(self) -> str:
         output = self._run(["shell", "dumpsys", "power"])

@@ -1,5 +1,5 @@
 # Phone control
-pure-python-adb==0.3.0.dev0
+# (ADB CLI is used directly via subprocess)
 
 # Speech to text
 faster-whisper==1.0.3
