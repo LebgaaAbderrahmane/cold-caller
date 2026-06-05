@@ -14,7 +14,7 @@ mkdir -p build/classes build/dex
 javac --release 8 -cp "$PLATFORM" -d build/classes src/com/coldcaller/CallHelper.java
 
 # Convert to DEX
-java -cp "$BUILD_TOOLS/lib/d8.jar" com.android.tools.r8.D8 --release --min-api 34 \
+java -cp "$BUILD_TOOLS/lib/d8.jar" com.android.tools.r8.D8 --release \
   --lib "$PLATFORM" --output build/dex build/classes/com/coldcaller/CallHelper.class
 
 # Package APK
