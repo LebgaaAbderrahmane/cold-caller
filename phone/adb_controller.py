@@ -125,32 +125,8 @@ class ADBController:
     def prepare_sim(self):
         current = self._get_voice_call_setting()
         self._saved_voice_setting = current
-        sub_id = self._get_subscription_id_for_slot(self.sim_slot)
-        print(f"   Current voice SIM: {current}")
-
-        self._set_voice_call_setting(sub_id)
-        time.sleep(0.5)
-        new_val = self._get_voice_call_setting()
-        if new_val != current and new_val not in ("null", "-1"):
-            print(f"   Voice SIM set via settings: sub_id={sub_id}")
-            return
-
-        self._set_voice_call_setting(self.sim_slot)
-        time.sleep(0.5)
-        new_val = self._get_voice_call_setting()
-        if new_val != current and new_val not in ("null", "-1"):
-            print(f"   Voice SIM set via settings: slot={self.sim_slot}")
-            return
-
-        out = self._run(
-            ["shell", "cmd", "phone", "set-default-slot", str(self.sim_slot)]
-        )
-        print(f"   cmd phone set-default-slot: '{out[:80]}'")
-
-        out = self._run(["shell", "service", "call", "phone", "15", "i32", str(sub_id)])
-        print(f"   service call phone 15: '{out[:80]}'")
-
-        print(f"   SIM preparation done")
+        print(f"   Current voice SIM setting: {current}")
+        print(f"   SIM selection via intent extras (APK controls this)")
 
     # ─────────────────────────────────────────
     # Call control

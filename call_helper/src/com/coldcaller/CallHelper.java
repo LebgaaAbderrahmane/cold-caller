@@ -63,35 +63,61 @@ public class CallHelper extends Activity {
                 SubscriptionManager subManager = (SubscriptionManager) getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE);
                 if (subManager != null) {
                     List<SubscriptionInfo> subs = subManager.getActiveSubscriptionInfoList();
+                    Log.i(TAG, "Active subscriptions: " + (subs != null ? subs.size() : "null"));
                     if (subs != null) {
                         for (SubscriptionInfo sub : subs) {
                             Log.i(TAG, "  sub: slot=" + sub.getSimSlotIndex()
                                 + " subId=" + sub.getSubscriptionId()
-                                + " carrier=" + sub.getCarrierName());
+                                + " carrier=" + sub.getCarrierName()
+                                + " iccId=" + sub.getIccId());
                         }
+
+                        SubscriptionInfo targetSub = null;
                         for (SubscriptionInfo sub : subs) {
                             if (sub.getSimSlotIndex() == simSlot) {
-                                callIntent.putExtra("com.android.phone.extra.slot", simSlot);
-                                callIntent.putExtra("slot", simSlot);
-                                Log.i(TAG, "Set MTK extras for slot=" + simSlot
-                                    + " (subId=" + sub.getSubscriptionId() + ")");
+                                targetSub = sub;
                                 break;
                             }
                         }
-                    }
-                }
 
-                TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
-                if (telecom != null) {
-                    List<PhoneAccountHandle> accounts = telecom.getCallCapablePhoneAccounts();
-                    if (accounts != null) {
-                        for (PhoneAccountHandle handle : accounts) {
-                            String id = handle.getId();
-                            Log.i(TAG, "  account: " + id + " (" + handle.getComponentName() + ")");
-                            if (id != null && id.contains(String.valueOf(simSlot))) {
-                                callIntent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
-                                Log.i(TAG, "Set PhoneAccountHandle: " + id);
-                                break;
+                        if (targetSub != null) {
+                            int subId = targetSub.getSubscriptionId();
+                            Log.i(TAG, "Target sub found: slot=" + simSlot + " subId=" + subId);
+
+                            callIntent.putExtra("com.android.phone.extra.slot", simSlot);
+                            callIntent.putExtra("slot", simSlot);
+                            callIntent.putExtra("subscription", subId);
+                            callIntent.putExtra("simId", subId);
+                            callIntent.putExtra("subscription_id", subId);
+                            callIntent.putExtra("sub_id", subId);
+                            callIntent.putExtra(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, subId);
+
+                            TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
+                            if (telecom != null) {
+                                List<PhoneAccountHandle> accounts = telecom.getCallCapablePhoneAccounts();
+                                Log.i(TAG, "Phone accounts: " + (accounts != null ? accounts.size() : "null"));
+                                if (accounts != null) {
+                                    for (PhoneAccountHandle handle : accounts) {
+                                        String id = handle.getId();
+                                        Log.i(TAG, "  account: " + id + " (" + handle.getComponentName() + ")");
+                                    }
+
+                                    for (PhoneAccountHandle handle : accounts) {
+                                        String id = handle.getId();
+                                        if (id != null) {
+                                            if (id.equals(String.valueOf(subId))
+                                                    || id.endsWith(":" + simSlot)
+                                                    || id.endsWith("/" + simSlot)
+                                                    || id.equals("sim" + simSlot)
+                                                    || id.equals("sub" + simSlot)
+                                                    || id.equals(String.valueOf(simSlot))) {
+                                                callIntent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
+                                                Log.i(TAG, "Set PhoneAccountHandle: " + id);
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
