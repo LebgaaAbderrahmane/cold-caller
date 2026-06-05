@@ -56,9 +56,8 @@ public class CallHelper extends Activity {
 
         try {
             Uri telUri = Uri.parse("tel:" + phoneNumber);
-
-            PhoneAccountHandle targetHandle = null;
             int subId = -1;
+            PhoneAccountHandle targetHandle = null;
 
             if (simSlot >= 0) {
                 SubscriptionManager subManager = (SubscriptionManager) getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE);
@@ -87,11 +86,8 @@ public class CallHelper extends Activity {
                     Log.i(TAG, "Phone accounts: " + (accounts != null ? accounts.size() : "null"));
                     if (accounts != null) {
                         for (PhoneAccountHandle handle : accounts) {
-                            String id = handle.getId();
-                            Log.i(TAG, "  account: " + id + " (" + handle.getComponentName() + ")");
+                            Log.i(TAG, "  account: " + handle.getId() + " (" + handle.getComponentName() + ")");
                         }
-
-                        // Match by subId first, then by slot
                         for (PhoneAccountHandle handle : accounts) {
                             String id = handle.getId();
                             if (id != null && (id.equals(String.valueOf(subId))
@@ -109,22 +105,108 @@ public class CallHelper extends Activity {
                 }
             }
 
-            boolean placed = tryPlaceCallViaTelecom(telUri, targetHandle, simSlot, subId);
-            if (!placed) {
-                placed = tryPlaceCallViaIntent(telUri, simSlot, subId);
-            }
+            boolean placed = tryDialerDirect(telUri, simSlot, subId);
+            if (!placed) placed = tryPlaceCallViaTelecom(telUri, targetHandle, simSlot, subId);
+            if (!placed) placed = tryITelephonyCall(phoneNumber, subId);
+            if (!placed) placed = tryPlaceCallViaIntent(telUri, simSlot, subId);
 
-            if (placed) {
-                setResult(RESULT_OK);
-            } else {
-                setResult(RESULT_CANCELED);
-            }
+            setResult(placed ? RESULT_OK : RESULT_CANCELED);
         } catch (Exception e) {
             Log.e(TAG, "Exception: " + e.getClass().getName() + ": " + e.getMessage());
             setResult(RESULT_CANCELED);
         }
 
         finish();
+    }
+
+    private boolean tryDialerDirect(Uri telUri, int simSlot, int subId) {
+        try {
+            TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
+            if (telecom == null) return false;
+
+            String defaultDialer = telecom.getDefaultDialerPackage();
+            Log.i(TAG, "Default dialer package: " + defaultDialer);
+
+            Intent intent = new Intent(Intent.ACTION_CALL, telUri);
+            intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            if (defaultDialer != null) {
+                intent.setPackage(defaultDialer);
+            }
+            if (simSlot >= 0) {
+                intent.putExtra("com.android.phone.extra.slot", simSlot);
+                intent.putExtra("slot", simSlot);
+                if (subId > 0) {
+                    intent.putExtra("subscription", subId);
+                    intent.putExtra(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, subId);
+                }
+            }
+            startActivity(intent);
+            Log.i(TAG, "Dialer direct call succeeded");
+            return true;
+        } catch (Exception e) {
+            Log.w(TAG, "Dialer direct failed: " + e.getMessage());
+            return false;
+        }
+    }
+
+    private boolean tryITelephonyCall(String number, int subId) {
+        try {
+            TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+            Method getITelephony = tm.getClass().getDeclaredMethod("getITelephony");
+            getITelephony.setAccessible(true);
+            Object telephony = getITelephony.invoke(tm);
+
+            Log.i(TAG, "ITelephony methods:");
+            for (Method m : telephony.getClass().getMethods()) {
+                String name = m.getName();
+                if (name.contains("call") || name.contains("dial") || name.contains("place")) {
+                    StringBuilder sb = new StringBuilder();
+                    sb.append("  ").append(name).append("(");
+                    for (Class<?> p : m.getParameterTypes()) {
+                        sb.append(p.getSimpleName()).append(",");
+                    }
+                    sb.append(")");
+                    Log.i(TAG, sb.toString());
+                }
+            }
+
+            String[][] callSignatures = {
+                {"call", String.class.getName(), int.class.getName()},
+                {"call", String.class.getName(), String.class.getName(), int.class.getName()},
+                {"call", String.class.getName(), String.class.getName()},
+                {"dial", String.class.getName(), int.class.getName()},
+            };
+
+            for (String[] sig : callSignatures) {
+                try {
+                    Class<?>[] paramTypes = new Class<?>[sig.length - 1];
+                    for (int i = 0; i < paramTypes.length; i++) {
+                        paramTypes[i] = Class.forName(sig[i + 1]);
+                    }
+                    Method m = telephony.getClass().getMethod(sig[0], paramTypes);
+                    Object[] args = new Object[paramTypes.length];
+                    if (paramTypes.length == 2 && paramTypes[1] == int.class) {
+                        args[0] = number;
+                        args[1] = subId;
+                    } else if (paramTypes.length == 3) {
+                        args[0] = getPackageName();
+                        args[1] = number;
+                        args[2] = subId;
+                    } else if (paramTypes.length == 2 && paramTypes[1] == String.class) {
+                        args[0] = number;
+                        args[1] = String.valueOf(subId);
+                    }
+                    m.invoke(telephony, args);
+                    Log.i(TAG, sig[0] + " succeeded");
+                    return true;
+                } catch (NoSuchMethodException e) {
+                    // try next
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "ITelephony call failed: " + e.getMessage());
+        }
+        return false;
     }
 
     private boolean tryPlaceCallViaTelecom(Uri telUri, PhoneAccountHandle handle, int simSlot, int subId) {
@@ -135,7 +217,7 @@ public class CallHelper extends Activity {
             Bundle extras = new Bundle();
             if (handle != null) {
                 extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
-                Log.i(TAG, "Using TelecomManager.placeCall with handle=" + handle.getId());
+                Log.i(TAG, "TelecomManager.placeCall with handle=" + handle.getId());
             }
             extras.putInt("com.android.phone.extra.slot", simSlot);
             extras.putInt("slot", simSlot);
@@ -159,7 +241,6 @@ public class CallHelper extends Activity {
         try {
             Intent callIntent = new Intent(Intent.ACTION_CALL, telUri);
             callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-
             if (simSlot >= 0) {
                 callIntent.putExtra("com.android.phone.extra.slot", simSlot);
                 callIntent.putExtra("slot", simSlot);
@@ -171,7 +252,6 @@ public class CallHelper extends Activity {
                     callIntent.putExtra(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, subId);
                 }
             }
-
             startActivity(callIntent);
             Log.i(TAG, "Intent.ACTION_CALL succeeded");
             return true;
@@ -185,11 +265,9 @@ public class CallHelper extends Activity {
 
     private boolean doHangup() {
         Log.i(TAG, "Hanging up");
-
         if (tryTelephonyEndCall()) return true;
         if (tryTelecomEndCall()) return true;
         if (tryServiceManagerPhone()) return true;
-
         Log.w(TAG, "All hangup methods failed");
         return false;
     }
@@ -200,7 +278,6 @@ public class CallHelper extends Activity {
             Method getITelephony = tm.getClass().getDeclaredMethod("getITelephony");
             getITelephony.setAccessible(true);
             Object telephony = getITelephony.invoke(tm);
-
             Method endCall = telephony.getClass().getDeclaredMethod("endCall");
             endCall.invoke(telephony);
             Log.i(TAG, "Hangup via ITelephony.endCall() succeeded");
@@ -217,7 +294,6 @@ public class CallHelper extends Activity {
             Method getTelecomService = telecom.getClass().getDeclaredMethod("getTelecomService");
             getTelecomService.setAccessible(true);
             Object iTelecom = getTelecomService.invoke(telecom);
-
             Method endCall = iTelecom.getClass().getMethod("endCall");
             endCall.invoke(iTelecom);
             Log.i(TAG, "Hangup via ITelecomService.endCall() succeeded");
@@ -237,15 +313,12 @@ public class CallHelper extends Activity {
                 Log.w(TAG, "phone service (binder) not found");
                 return false;
             }
-
             Class<?> iTelephony = Class.forName("com.android.internal.telephony.ITelephony");
             Method asInterface = iTelephony.getMethod("asInterface", IBinder.class);
             Object telephony = asInterface.invoke(null, binder);
-
             for (Method m : telephony.getClass().getMethods()) {
                 String name = m.getName().toLowerCase();
-                if ((name.contains("end") || name.contains("hangup"))
-                        && m.getParameterCount() == 0) {
+                if ((name.contains("end") || name.contains("hangup")) && m.getParameterCount() == 0) {
                     Log.i(TAG, "Trying method: " + m.getName());
                     m.invoke(telephony);
                     Log.i(TAG, m.getName() + " succeeded");

@@ -126,7 +126,21 @@ class ADBController:
         current = self._get_voice_call_setting()
         self._saved_voice_setting = current
         print(f"   Current voice SIM setting: {current}")
-        print(f"   SIM selection via intent extras (APK controls this)")
+
+        for ns in ["global", "system", "secure"]:
+            for val in [str(self.sim_slot), str(self.sim_slot + 1)]:
+                out = self._run_full(
+                    ["shell", "settings", "put", ns, "multi_sim_voice_call", val]
+                )
+                time.sleep(0.3)
+                new_val = self._run(
+                    ["shell", "settings", "get", ns, "multi_sim_voice_call"]
+                )
+                if new_val not in ("null", "", "-1") and new_val != current:
+                    print(f"   Set via {ns}: multi_sim_voice_call={new_val}")
+                    return
+
+        print(f"   Could not change default SIM; APK will try multiple approaches")
 
     # ─────────────────────────────────────────
     # Call control
