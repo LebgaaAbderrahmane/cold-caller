@@ -56,8 +56,9 @@ public class CallHelper extends Activity {
 
         try {
             Uri telUri = Uri.parse("tel:" + phoneNumber);
-            Intent callIntent = new Intent(Intent.ACTION_CALL, telUri);
-            callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            PhoneAccountHandle targetHandle = null;
+            int subId = -1;
 
             if (simSlot >= 0) {
                 SubscriptionManager subManager = (SubscriptionManager) getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE);
@@ -68,74 +69,118 @@ public class CallHelper extends Activity {
                         for (SubscriptionInfo sub : subs) {
                             Log.i(TAG, "  sub: slot=" + sub.getSimSlotIndex()
                                 + " subId=" + sub.getSubscriptionId()
-                                + " carrier=" + sub.getCarrierName()
-                                + " iccId=" + sub.getIccId());
+                                + " carrier=" + sub.getCarrierName());
                         }
-
-                        SubscriptionInfo targetSub = null;
                         for (SubscriptionInfo sub : subs) {
                             if (sub.getSimSlotIndex() == simSlot) {
-                                targetSub = sub;
+                                subId = sub.getSubscriptionId();
+                                Log.i(TAG, "Target subId=" + subId + " for slot=" + simSlot);
                                 break;
                             }
                         }
+                    }
+                }
 
-                        if (targetSub != null) {
-                            int subId = targetSub.getSubscriptionId();
-                            Log.i(TAG, "Target sub found: slot=" + simSlot + " subId=" + subId);
+                TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
+                if (telecom != null) {
+                    List<PhoneAccountHandle> accounts = telecom.getCallCapablePhoneAccounts();
+                    Log.i(TAG, "Phone accounts: " + (accounts != null ? accounts.size() : "null"));
+                    if (accounts != null) {
+                        for (PhoneAccountHandle handle : accounts) {
+                            String id = handle.getId();
+                            Log.i(TAG, "  account: " + id + " (" + handle.getComponentName() + ")");
+                        }
 
-                            callIntent.putExtra("com.android.phone.extra.slot", simSlot);
-                            callIntent.putExtra("slot", simSlot);
-                            callIntent.putExtra("subscription", subId);
-                            callIntent.putExtra("simId", subId);
-                            callIntent.putExtra("subscription_id", subId);
-                            callIntent.putExtra("sub_id", subId);
-                            callIntent.putExtra(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, subId);
-
-                            TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
-                            if (telecom != null) {
-                                List<PhoneAccountHandle> accounts = telecom.getCallCapablePhoneAccounts();
-                                Log.i(TAG, "Phone accounts: " + (accounts != null ? accounts.size() : "null"));
-                                if (accounts != null) {
-                                    for (PhoneAccountHandle handle : accounts) {
-                                        String id = handle.getId();
-                                        Log.i(TAG, "  account: " + id + " (" + handle.getComponentName() + ")");
-                                    }
-
-                                    for (PhoneAccountHandle handle : accounts) {
-                                        String id = handle.getId();
-                                        if (id != null) {
-                                            if (id.equals(String.valueOf(subId))
-                                                    || id.endsWith(":" + simSlot)
-                                                    || id.endsWith("/" + simSlot)
-                                                    || id.equals("sim" + simSlot)
-                                                    || id.equals("sub" + simSlot)
-                                                    || id.equals(String.valueOf(simSlot))) {
-                                                callIntent.putExtra(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
-                                                Log.i(TAG, "Set PhoneAccountHandle: " + id);
-                                                break;
-                                            }
-                                        }
-                                    }
-                                }
+                        // Match by subId first, then by slot
+                        for (PhoneAccountHandle handle : accounts) {
+                            String id = handle.getId();
+                            if (id != null && (id.equals(String.valueOf(subId))
+                                    || id.endsWith(":" + simSlot)
+                                    || id.endsWith("/" + simSlot)
+                                    || id.equals("sim" + simSlot)
+                                    || id.equals("sub" + simSlot)
+                                    || id.equals(String.valueOf(simSlot)))) {
+                                targetHandle = handle;
+                                Log.i(TAG, "Matched PhoneAccountHandle: " + id);
+                                break;
                             }
                         }
                     }
                 }
             }
 
-            startActivity(callIntent);
-            Log.i(TAG, "Call initiated");
-            setResult(RESULT_OK);
-        } catch (SecurityException e) {
-            Log.e(TAG, "SecurityException: " + e.getMessage());
-            setResult(RESULT_CANCELED);
+            boolean placed = tryPlaceCallViaTelecom(telUri, targetHandle, simSlot, subId);
+            if (!placed) {
+                placed = tryPlaceCallViaIntent(telUri, simSlot, subId);
+            }
+
+            if (placed) {
+                setResult(RESULT_OK);
+            } else {
+                setResult(RESULT_CANCELED);
+            }
         } catch (Exception e) {
             Log.e(TAG, "Exception: " + e.getClass().getName() + ": " + e.getMessage());
             setResult(RESULT_CANCELED);
         }
 
         finish();
+    }
+
+    private boolean tryPlaceCallViaTelecom(Uri telUri, PhoneAccountHandle handle, int simSlot, int subId) {
+        try {
+            TelecomManager telecom = (TelecomManager) getSystemService(TELECOM_SERVICE);
+            if (telecom == null) return false;
+
+            Bundle extras = new Bundle();
+            if (handle != null) {
+                extras.putParcelable(TelecomManager.EXTRA_PHONE_ACCOUNT_HANDLE, handle);
+                Log.i(TAG, "Using TelecomManager.placeCall with handle=" + handle.getId());
+            }
+            extras.putInt("com.android.phone.extra.slot", simSlot);
+            extras.putInt("slot", simSlot);
+            if (subId > 0) {
+                extras.putInt("subscription", subId);
+                extras.putInt(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, subId);
+            }
+
+            telecom.placeCall(telUri, extras);
+            Log.i(TAG, "TelecomManager.placeCall succeeded");
+            return true;
+        } catch (SecurityException e) {
+            Log.w(TAG, "TelecomManager.placeCall SecurityException: " + e.getMessage());
+        } catch (Exception e) {
+            Log.w(TAG, "TelecomManager.placeCall failed: " + e.getMessage());
+        }
+        return false;
+    }
+
+    private boolean tryPlaceCallViaIntent(Uri telUri, int simSlot, int subId) {
+        try {
+            Intent callIntent = new Intent(Intent.ACTION_CALL, telUri);
+            callIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+            if (simSlot >= 0) {
+                callIntent.putExtra("com.android.phone.extra.slot", simSlot);
+                callIntent.putExtra("slot", simSlot);
+                if (subId > 0) {
+                    callIntent.putExtra("subscription", subId);
+                    callIntent.putExtra("simId", subId);
+                    callIntent.putExtra("subscription_id", subId);
+                    callIntent.putExtra("sub_id", subId);
+                    callIntent.putExtra(SubscriptionManager.EXTRA_SUBSCRIPTION_INDEX, subId);
+                }
+            }
+
+            startActivity(callIntent);
+            Log.i(TAG, "Intent.ACTION_CALL succeeded");
+            return true;
+        } catch (SecurityException e) {
+            Log.w(TAG, "Intent.ACTION_CALL SecurityException: " + e.getMessage());
+        } catch (Exception e) {
+            Log.w(TAG, "Intent.ACTION_CALL failed: " + e.getMessage());
+        }
+        return false;
     }
 
     private boolean doHangup() {
