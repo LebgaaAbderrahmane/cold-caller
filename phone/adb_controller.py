@@ -52,9 +52,6 @@ class ADBController:
         print(f"ADB connected: {lines[0]}")
 
     def _ensure_helper_apk_installed(self):
-        installed = self._run(["shell", "pm", "list", "packages", HELPER_PACKAGE])
-        if HELPER_PACKAGE in installed:
-            return
         if not os.path.exists(HELPER_APK_PATH):
             raise RuntimeError(
                 f"Helper APK not found at {HELPER_APK_PATH}\n"
@@ -102,24 +99,36 @@ class ADBController:
 
     def _get_subscription_id_for_slot(self, slot: int) -> int:
         output = self._run(
+            [
+                "shell",
+                "content",
+                "query",
+                "--uri",
+                "content://telephony/siminfo/",
+                "--projection",
+                "slot_index,subscription_id",
+            ]
+        )
+        for line in output.split("\n"):
+            line = line.strip()
+            if not line.startswith("Row:"):
+                continue
+            slot_m = re.search(r"slot_index\s*=\s*(\d+)", line, re.IGNORECASE)
+            sub_m = re.search(r"subscription_id\s*=\s*(\d+)", line, re.IGNORECASE)
+            if slot_m and sub_m and int(slot_m.group(1)) == slot:
+                return int(sub_m.group(1))
+        # Fallback: try parsing without projection
+        output = self._run(
             ["shell", "content", "query", "--uri", "content://telephony/siminfo/"]
         )
-        if "Row:" in output:
-            current_slot_id = None
-            for line in output.split("\n"):
-                line = line.strip()
-                slot_match = (
-                    re.search(r"slot_index\s*=\s*(\d+)", line, re.IGNORECASE)
-                    or re.search(r"sim_id\s*=\s*(\d+)", line, re.IGNORECASE)
-                    or re.search(r"card_id\s*=\s*(\d+)", line, re.IGNORECASE)
-                )
-                sub_match = re.search(
-                    r"subscription_id\s*=\s*(\d+)", line, re.IGNORECASE
-                ) or re.search(r"_id\s*=\s*(\d+)", line, re.IGNORECASE)
-                if slot_match:
-                    current_slot_id = int(slot_match.group(1))
-                if current_slot_id == slot and sub_match:
-                    return int(sub_match.group(1))
+        for line in output.split("\n"):
+            line = line.strip()
+            if not line.startswith("Row:"):
+                continue
+            slot_m = re.search(r"slot_index\s*=\s*(\d+)", line, re.IGNORECASE)
+            sub_m = re.search(r"subscription_id\s*=\s*(\d+)", line, re.IGNORECASE)
+            if slot_m and sub_m and int(slot_m.group(1)) == slot:
+                return int(sub_m.group(1))
         return slot + 1
 
     def prepare_sim(self):
@@ -127,8 +136,11 @@ class ADBController:
         self._saved_voice_setting = current
         print(f"   Current voice SIM setting: {current}")
 
+        sub_id = self._get_subscription_id_for_slot(self.sim_slot)
+        print(f"   Target subId for slot {self.sim_slot}: {sub_id}")
+
         for ns in ["global", "system", "secure"]:
-            for val in [str(self.sim_slot), str(self.sim_slot + 1)]:
+            for val in [str(sub_id), str(self.sim_slot), str(self.sim_slot + 1)]:
                 out = self._run_full(
                     ["shell", "settings", "put", ns, "multi_sim_voice_call", val]
                 )
@@ -140,7 +152,45 @@ class ADBController:
                     print(f"   Set via {ns}: multi_sim_voice_call={new_val}")
                     return
 
-        print(f"   Could not change default SIM; APK will try multiple approaches")
+        print(
+            f"   Could not change default SIM via settings; trying content update fallback..."
+        )
+
+        out = self._run_full(
+            [
+                "shell",
+                "content",
+                "update",
+                "--uri",
+                "content://telephony/siminfo/",
+                "--bind",
+                "is_voice_active:1",
+                "--where",
+                f"slot_index={self.sim_slot}",
+            ]
+        )
+        print(f"   content update sim {self.sim_slot}: {out[:60]}")
+        out = self._run_full(
+            [
+                "shell",
+                "content",
+                "update",
+                "--uri",
+                "content://telephony/siminfo/",
+                "--bind",
+                "is_voice_active:0",
+                "--where",
+                f"slot_index={1 - self.sim_slot}",
+            ]
+        )
+        print(f"   content update sim {1 - self.sim_slot}: {out[:60]}")
+
+        new_val = self._get_voice_call_setting()
+        if new_val != current and new_val not in ("null", "", "-1"):
+            print(f"   Voice SIM changed to: {new_val}")
+            return
+
+        print(f"   Default SIM unchanged ({current})")
 
     # ─────────────────────────────────────────
     # Call control

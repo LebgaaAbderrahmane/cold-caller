@@ -105,6 +105,8 @@ public class CallHelper extends Activity {
                 }
             }
 
+            if (subId > 0) trySetDefaultVoiceSub(subId);
+
             boolean placed = tryDialerDirect(telUri, simSlot, subId);
             if (!placed) placed = tryPlaceCallViaTelecom(telUri, targetHandle, simSlot, subId);
             if (!placed) placed = tryITelephonyCall(phoneNumber, subId);
@@ -261,6 +263,40 @@ public class CallHelper extends Activity {
             Log.w(TAG, "Intent.ACTION_CALL failed: " + e.getMessage());
         }
         return false;
+    }
+
+    private void trySetDefaultVoiceSub(int subId) {
+        Log.i(TAG, "Trying to set default voice sub to " + subId);
+        try {
+            SubscriptionManager subManager = (SubscriptionManager) getSystemService(TELEPHONY_SUBSCRIPTION_SERVICE);
+            if (subManager == null) return;
+
+            Method m = subManager.getClass().getMethod("setDefaultVoiceSubId", int.class);
+            m.invoke(subManager, subId);
+            Log.i(TAG, "setDefaultVoiceSubId(" + subId + ") succeeded");
+        } catch (Exception e) {
+            Log.w(TAG, "setDefaultVoiceSubId failed: " + e.getMessage());
+        }
+
+        try {
+            TelephonyManager tm = (TelephonyManager) getSystemService(TELEPHONY_SERVICE);
+            Method getITelephony = tm.getClass().getDeclaredMethod("getITelephony");
+            getITelephony.setAccessible(true);
+            Object telephony = getITelephony.invoke(tm);
+
+            for (Method m : telephony.getClass().getMethods()) {
+                String name = m.getName().toLowerCase();
+                if ((name.contains("default") || name.contains("preferred"))
+                        && m.getParameterCount() == 1
+                        && m.getParameterTypes()[0] == int.class) {
+                    Log.i(TAG, "Trying ITelephony." + m.getName() + "(" + subId + ")");
+                    m.invoke(telephony, subId);
+                    Log.i(TAG, m.getName() + " succeeded");
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "ITelephony default methods failed: " + e.getMessage());
+        }
     }
 
     private boolean doHangup() {
