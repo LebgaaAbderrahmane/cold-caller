@@ -58,13 +58,15 @@ class ADBController:
                 "   Run: cd call_helper && ./build.sh"
             )
         print("Installing call helper APK...")
-        result = self._run_full(
-            ["install", "-r", "-g", "--no-incremental", HELPER_APK_PATH]
-        )
+        result = self._run_full(["install", "-r", "--no-incremental", HELPER_APK_PATH])
         if "Success" in result:
             print("   Helper APK installed")
         else:
             print(f"   Install issue: {result[:200]}")
+            # Retry without flags
+            result = self._run_full(["install", "-r", HELPER_APK_PATH])
+            if "Success" in result:
+                print("   Helper APK installed (retry)")
 
         grant = self._run_full(
             ["shell", "pm", "grant", HELPER_PACKAGE, "android.permission.CALL_PHONE"]
@@ -103,18 +105,25 @@ class ADBController:
         output = self._run(
             ["shell", "content", "query", "--uri", "content://telephony/siminfo/"]
         )
-        for m in re.finditer(
-            r"Row:.*?slot_index\s*=\s*" + str(slot) + r".*?subscription_id\s*=\s*(\d+)",
-            output,
-            re.IGNORECASE | re.DOTALL,
-        ):
-            return int(m.group(1))
-        for m in re.finditer(
-            r"Row:.*?subscription_id\s*=\s*(\d+).*?slot_index\s*=\s*" + str(slot),
-            output,
-            re.IGNORECASE | re.DOTALL,
-        ):
-            return int(m.group(1))
+        for col in ["subscription_id", "sub_id", "_id", "sim_id"]:
+            for m in re.finditer(
+                r"Row:.*?slot_index\s*=\s*"
+                + str(slot)
+                + r".*?"
+                + col
+                + r"\s*=\s*(\d+)",
+                output,
+                re.IGNORECASE | re.DOTALL,
+            ):
+                return int(m.group(1))
+            for m in re.finditer(
+                r"Row:.*?" + col + r"\s*=\s*(\d+).*?slot_index\s*=\s*" + str(slot),
+                output,
+                re.IGNORECASE | re.DOTALL,
+            ):
+                return int(m.group(1))
+        # Dump raw output for debugging
+        print(f"   Raw siminfo output:\n{output[:500]}")
         return slot + 1
 
     def prepare_sim(self):
