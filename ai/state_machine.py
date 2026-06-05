@@ -20,7 +20,12 @@ _TRANSITIONS = {
     CallState.RINGING: [CallState.GREETING, CallState.IDLE],
     CallState.GREETING: [CallState.LISTENING],
     CallState.LISTENING: [CallState.THINKING, CallState.CLOSING, CallState.IDLE],
-    CallState.THINKING: [CallState.SPEAKING, CallState.CLOSING, CallState.IDLE],
+    CallState.THINKING: [
+        CallState.SPEAKING,
+        CallState.LISTENING,
+        CallState.CLOSING,
+        CallState.IDLE,
+    ],
     CallState.SPEAKING: [CallState.LISTENING, CallState.CLOSING, CallState.IDLE],
     CallState.CLOSING: [CallState.HANGUP],
     CallState.HANGUP: [CallState.LOGGED, CallState.IDLE],
