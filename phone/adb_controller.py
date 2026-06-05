@@ -58,11 +58,13 @@ class ADBController:
                 "   Run: cd call_helper && ./build.sh"
             )
         print("Installing call helper APK...")
-        result = self._run_full(["install", "-r", "-g", HELPER_APK_PATH])
+        result = self._run_full(
+            ["install", "-r", "-g", "--no-incremental", HELPER_APK_PATH]
+        )
         if "Success" in result:
             print("   Helper APK installed")
         else:
-            print(f"   Install issue: {result[:100]}")
+            print(f"   Install issue: {result[:200]}")
 
         grant = self._run_full(
             ["shell", "pm", "grant", HELPER_PACKAGE, "android.permission.CALL_PHONE"]
@@ -99,34 +101,20 @@ class ADBController:
 
     def _get_subscription_id_for_slot(self, slot: int) -> int:
         output = self._run(
-            [
-                "shell",
-                "content",
-                "query",
-                "--uri",
-                "content://telephony/siminfo/",
-                "--projection",
-                "slot_index,subscription_id",
-            ]
+            ["shell", "content", "query", "--uri", "content://telephony/siminfo/"]
         )
-        for line in output.split("\n"):
-            if "Row:" not in line:
-                continue
-            parts = line.replace("Row:", "").strip().split(",")
-            slot_idx = None
-            sub_id = None
-            for p in parts:
-                p = p.strip()
-                if "=" in p:
-                    k, v = p.split("=", 1)
-                    k = k.strip().lower()
-                    v = v.strip()
-                    if k == "slot_index":
-                        slot_idx = int(v)
-                    elif k == "subscription_id":
-                        sub_id = int(v)
-            if slot_idx == slot and sub_id is not None:
-                return sub_id
+        for m in re.finditer(
+            r"Row:.*?slot_index\s*=\s*" + str(slot) + r".*?subscription_id\s*=\s*(\d+)",
+            output,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            return int(m.group(1))
+        for m in re.finditer(
+            r"Row:.*?subscription_id\s*=\s*(\d+).*?slot_index\s*=\s*" + str(slot),
+            output,
+            re.IGNORECASE | re.DOTALL,
+        ):
+            return int(m.group(1))
         return slot + 1
 
     def prepare_sim(self):
@@ -150,7 +138,18 @@ class ADBController:
                     print(f"   Set via {ns}: multi_sim_voice_call={new_val}")
                     return
 
-        print(f"   Default SIM unchanged ({current}); APK will try reflection")
+        print(f"   Default SIM unchanged ({current}); trying service call phone 15...")
+        out = self._run_full(
+            ["shell", "service", "call", "phone", "15", "i32", str(sub_id)]
+        )
+        print(f"   service call phone 15: '{out[:60]}'")
+        time.sleep(0.5)
+        new_val = self._get_voice_call_setting()
+        if new_val != current and new_val not in ("null", "", "-1"):
+            print(f"   Voice SIM changed to: {new_val}")
+            return
+
+        print(f"   Default SIM unchanged; APK will try reflection")
 
     # ─────────────────────────────────────────
     # Call control
