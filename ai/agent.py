@@ -265,8 +265,12 @@ class CallAgent:
         try:
             audio = self.tts.synthesize(text, language=language)
             if len(audio) > 0:
+                self.adb.set_speakerphone(True)
+                time.sleep(0.2)
                 pcm = (audio * 32767).astype(np.int16).tobytes()
                 self.audio_bridge.play_audio(pcm)
+                time.sleep(0.3)
+                self.adb.set_speakerphone(False)
         except Exception:
             pass
 

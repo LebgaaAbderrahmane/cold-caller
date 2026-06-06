@@ -81,7 +81,11 @@ class AudioBridge:
             self._connect_playback()
             if self._playback_sock:
                 self._playback_sock.sendall(pcm_data)
-                self._playback_sock.shutdown(socket.SHUT_WR)
+                # Do NOT shutdown/shutdown — server blocks on read().
+                # Wait for audio to finish playing before closing
+                # so the server doesn't kill AudioTrack mid-playback.
+                duration_s = len(pcm_data) / (sample_rate * 2)
+                time.sleep(duration_s + 0.5)
         except Exception:
             pass
         finally:

@@ -31,6 +31,14 @@
                 <action android:name="com.coldcaller.HANGUP" />
                 <category android:name="android.intent.category.DEFAULT" />
             </intent-filter>
+            <intent-filter>
+                <action android:name="com.coldcaller.SPEAKERPHONE_ON" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
+            <intent-filter>
+                <action android:name="com.coldcaller.SPEAKERPHONE_OFF" />
+                <category android:name="android.intent.category.DEFAULT" />
+            </intent-filter>
         </activity>
 
         <service

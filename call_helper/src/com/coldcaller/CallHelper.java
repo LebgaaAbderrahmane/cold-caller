@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.media.AudioManager;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -24,6 +25,8 @@ public class CallHelper extends Activity {
     private static final String ACTION_HANGUP = "com.coldcaller.HANGUP";
     private static final String ACTION_START_AUDIO = "com.coldcaller.START_AUDIO";
     private static final String ACTION_STOP_AUDIO = "com.coldcaller.STOP_AUDIO";
+    private static final String ACTION_SPEAKERPHONE_ON = "com.coldcaller.SPEAKERPHONE_ON";
+    private static final String ACTION_SPEAKERPHONE_OFF = "com.coldcaller.SPEAKERPHONE_OFF";
     private static final int PERMISSION_REQUEST = 100;
 
     private String pendingNumber;
@@ -62,6 +65,19 @@ public class CallHelper extends Activity {
         if (ACTION_STOP_AUDIO.equals(action)) {
             Log.i(TAG, "Stopping AudioBridgeService");
             stopService(new Intent(this, AudioBridgeService.class));
+            setResult(RESULT_OK);
+            finish();
+            return;
+        }
+
+        if (ACTION_SPEAKERPHONE_ON.equals(action) || ACTION_SPEAKERPHONE_OFF.equals(action)) {
+            boolean on = ACTION_SPEAKERPHONE_ON.equals(action);
+            Log.i(TAG, "Setting speakerphone " + (on ? "ON" : "OFF"));
+            AudioManager am = (AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am != null) {
+                am.setSpeakerphoneOn(on);
+                Log.i(TAG, "Speakerphone " + (on ? "ON" : "OFF") + " result=" + am.isSpeakerphoneOn());
+            }
             setResult(RESULT_OK);
             finish();
             return;

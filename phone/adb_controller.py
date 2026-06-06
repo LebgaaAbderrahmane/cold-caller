@@ -402,6 +402,30 @@ class ADBController:
             self._mic_muted = False
 
     # ─────────────────────────────────────────
+    # Speakerphone control
+    # ─────────────────────────────────────────
+
+    def set_speakerphone(self, on: bool):
+        """Enable or disable speakerphone during an active call."""
+        action = (
+            "com.coldcaller.SPEAKERPHONE_ON"
+            if on
+            else "com.coldcaller.SPEAKERPHONE_OFF"
+        )
+        self._run_full(
+            [
+                "shell",
+                "am",
+                "start",
+                "-n",
+                f"{HELPER_PACKAGE}/{HELPER_ACTIVITY}",
+                "-a",
+                action,
+            ]
+        )
+        time.sleep(0.3)
+
+    # ─────────────────────────────────────────
     # Audio file playback
     # ─────────────────────────────────────────
 
